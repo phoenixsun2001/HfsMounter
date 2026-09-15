@@ -1,0 +1,17 @@
+# .NET build outputs
+bin/
+obj/
+publish/
+*.user
+*.suo
+.vs/
+
+# Rider / VSCode
+.idea/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# mimosa scanner state
+.mimosa/
