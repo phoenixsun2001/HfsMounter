@@ -43,6 +43,9 @@ public sealed class HfsFileSystem : FileSystemBase
 
     private Catalog Cat => _vol.Cat!;
 
+    /// <summary>卷标（资源管理器里显示的卷名），由挂载方按需设置。</summary>
+    public string Label { get; set; } = "MacDisk";
+
     private static ulong HfsToWin32(uint hfs)
     {
         if (hfs == 0) return 0;
@@ -102,7 +105,7 @@ public sealed class HfsFileSystem : FileSystemBase
             TotalSize = _vol.TotalBytes,
             FreeSize = 0, // read-only
         };
-        VolumeInfo.SetVolumeLabel("MacDisk");
+        VolumeInfo.SetVolumeLabel(Label);
         return FileSystemBase.STATUS_SUCCESS;
     }
 

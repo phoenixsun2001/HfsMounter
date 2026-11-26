@@ -1,10 +1,31 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+
+    <!-- 服务与裸盘访问都是 Windows 专属 API，统一声明平台，避免 CA1416 噪音 -->
+    <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
+    <NoWarn>$(NoWarn);CA1416</NoWarn>
+
+    <AssemblyName>HfsMounter</AssemblyName>
+    <RootNamespace>HfsMounter</RootNamespace>
+    <AssemblyTitle>HfsMounter</AssemblyTitle>
+    <Product>HfsMounter</Product>
+    <Description>Windows 只读 HFS+/HFSX 挂载器（常驻服务版）</Description>
+    <Version>2.0.0</Version>
+    <FileVersion>2.0.0.0</FileVersion>
+    <AssemblyVersion>2.0.0.0</AssemblyVersion>
+    <Copyright>MIT</Copyright>
+    <NeutralLanguage>zh-Hans</NeutralLanguage>
+    <SatelliteResourceLanguages>zh-Hans;en</SatelliteResourceLanguages>
+
+    <!-- 服务日志里不要出现本地化差异，避免影响时间戳/数字解析 -->
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <TieredPGO>true</TieredPGO>
   </PropertyGroup>
 
   <ItemGroup>
