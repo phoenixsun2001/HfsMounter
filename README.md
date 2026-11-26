@@ -203,12 +203,14 @@ cd src\scripts
 
 以下结果来自 Windows 11（10.0.26200）+ .NET 8 + WinFsp 2.1.25156 + 一块 1 TB USB 机械盘（GPT，第二个分区为 HFS+/HFSX 日志式）：
 
-- 服务 `sc qc HfsMounter`：`START_TYPE = AUTO_START (DELAYED)`，账户 `LocalSystem`，登录即启动，无需再手动跑脚本。
-- 插盘后 15 秒内自动挂载到 `C:\MacDisk`，卷标取自卷上的名字（本例 `seagate`）。
-- 目录列举、文件读取、Time Machine 快照浏览（`Backups.backupdb/<机器名>/<时间戳>` 的目录硬链接与文件硬链接）均正常；
-  写入/删除被拒绝（`Access to the path ... is denied`）。
-- 强杀服务进程后由 SCM 在约 5 秒内自动拉起，并重新挂载（旧挂载点的残留 reparse point 被自动清理）。
+- 服务 `sc qc HfsMounter`：`START_TYPE = AUTO_START`（`DelayedAutoStart=0`，非延迟启动），账户 `LocalSystem`；
+  **整机重启后无需登录、无需任何交互即可自动挂载**。
+- 服务启动到挂载完成 0.5 秒内；插盘后在下一次轮询（默认 3 秒）内自动挂载到 `C:\MacDisk`，卷标取自卷上的名字（本例 `seagate`）。
+- 目录列举、文件读取、Time Machine 快照浏览（`Backups.backupdb/<机器名>/<时间戳>` 的目录硬链接与文件硬链接）均正常，
+  3 个快照列举耗时 73 ms；写入/删除被拒绝（`Access to the path ... is denied`）。
+- 强杀服务进程后由 SCM 在约 5 秒内自动拉起，18 秒内重新挂载（旧挂载点的残留 reparse point 被自动清理），期间目录访问零阻塞。
 - 拔盘/卸载逻辑：连续 `removalGracePolls` 次健康检查失败才卸载，避免 USB 瞬时抖动误伤。
+- 盘符联动：登录后 `X:` 自动出现并指向 `C:\MacDisk`，拔盘时自动收回；无管理员权限时通过「启动」文件夹实现，不弹 UAC。
 
 ## 与上游版本的差异
 
@@ -216,7 +218,7 @@ cd src\scripts
 - 新增自动检测与自动挂载、拔盘自动卸载、健康检查、挂载点稳定性（`state.json`）。
 - 新增日志框架、配置系统、`--status` / `--probe` / `--version` 诊断命令。
 - 新增 `--selftest`：用合成 GPT/HFS 镜像验证解析链路，不需要管理员、不接触真实磁盘。
-- 新增盘符联动 `--linker*`，保留旧脚本“映射成 X: 并自动打开”的体验，但改为登录自启任务。
+- 新增盘符联动 `--linker*`，保留旧脚本“映射成 X: 并自动打开”的体验；登录自启用计划任务，无管理员权限时自动回退到「启动」文件夹。
 - 旧的两个 bat（写死作者本机路径）已被 `scripts\*.bat` + `*.ps1` 取代。
 - 修正 `HfsFileSystem` 的卷标硬编码，卷标可通过配置覆盖。
 
