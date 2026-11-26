@@ -87,9 +87,14 @@ HfsMounter.exe --list                       打印目录树自测，不挂载
 
 ```text
 HfsMounter.exe --linker X: C:\MacDisk --watch   前台持续维护映射
-HfsMounter.exe --linker-install X: C:\MacDisk   创建登录自启任务（任务名 HfsMounter-DriveLetter）
-HfsMounter.exe --linker-uninstall               删除该任务
+HfsMounter.exe --linker-install X: C:\MacDisk   创建登录自启入口（计划任务 HfsMounter-DriveLetter）
+HfsMounter.exe --linker-uninstall               删除自启入口
 ```
+
+`--linker-install` 会先尝试创建计划任务；**没有管理员权限时自动退回**当前用户的“启动”文件夹
+（`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\HfsMounter 盘符联动.cmd`），
+效果相同，只是仅对该用户生效。映射在挂载目录就绪后才出现，拔盘后自动收回，不会留一个空的 `X:`。
+不想要自动打开资源管理器就把配置里的 `autoOpenExplorer` 设为 `false` 后再重新 `--linker-install`。
 
 ## 配置
 
@@ -189,7 +194,7 @@ cd src\scripts
 | 服务装了但没挂载 | 看日志里 `挂载失败` / `挂载点 …` 相关行；确认 `mountRoot` 目录可写、没被别的程序占用 |
 | 日志里出现 `挂载点 C:\MacDisk 已被占用` | 该目录已存在且非空（或有别的程序在用），服务会自动改用 `C:\MacDisk2`、`C:\MacDisk3`……；也可以手工删掉这个空目录或改 `mountRoot` |
 | 挂载目录里是空的 | 磁盘可能是 APFS；本工具只支持 HFS+/HFSX |
-| 盘符 X: 没出现 | 盘符联动是每用户任务：`HfsMounter.exe --linker-install X: C:\MacDisk`，或重新登录 |
+| 盘符 X: 没出现 | 盘符联动是每用户入口：`HfsMounter.exe --linker-install X: C:\MacDisk`（无管理员权限会自动写“启动”文件夹），或重新登录 |
 
 > 目录挂载点由 WinFsp 自己创建（内部用 `FspCreateDirectoryFileW` + reparse point），程序不会预先 `mkdir`；
 > 服务启动或重启时会先清掉上次异常退出残留的 reparse point / 空目录，再挂载。

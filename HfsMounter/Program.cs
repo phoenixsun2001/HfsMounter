@@ -533,8 +533,8 @@ public static class Program
 
             盘符联动（可选，把挂载目录映射成盘符，等效 subst）:
               HfsMounter.exe --linker X: C:\MacDisk --watch      持续维护盘符
-              HfsMounter.exe --linker-install X: C:\MacDisk      创建登录自启任务
-              HfsMounter.exe --linker-uninstall                  删除该任务
+              HfsMounter.exe --linker-install X: C:\MacDisk      创建登录自启入口（无管理员权限时写“启动”文件夹）
+              HfsMounter.exe --linker-uninstall                  删除该入口
 
             说明:
               * 服务以 LocalSystem 运行，挂载点是目录（默认 {new AppConfig().MountRoot}），对所有用户可见；
