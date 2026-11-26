@@ -207,7 +207,7 @@ cd src\scripts
 
 ## 与上游版本的差异
 
-- 新增 Windows 服务模式（`--service` / `--install-service`），开机自启、失败自动重启、延迟启动避免和显卡驱动抢启动时机。
+- 新增 Windows 服务模式（`--service` / `--install-service`），登录前即随系统启动（`AUTO_START`），失败由 SCM 按 5s / 15s / 60s 退避重启。
 - 新增自动检测与自动挂载、拔盘自动卸载、健康检查、挂载点稳定性（`state.json`）。
 - 新增日志框架、配置系统、`--status` / `--probe` / `--version` 诊断命令。
 - 新增 `--selftest`：用合成 GPT/HFS 镜像验证解析链路，不需要管理员、不接触真实磁盘。

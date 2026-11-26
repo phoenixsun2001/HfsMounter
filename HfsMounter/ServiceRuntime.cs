@@ -240,12 +240,12 @@ public static class ServiceRuntime
             }
 
             Console.WriteLine($"  可执行文件: {binaryPath}");
-            Console.WriteLine($"  启动类型:   自动（延迟启动）");
+            Console.WriteLine($"  启动类型:   自动（开机即启动）");
             Console.WriteLine($"  运行账户:   LocalSystem");
 
             SetDescription(service);
             SetFailureActions(service);
-            SetDelayedAutoStart(service);
+            SetStartImmediately(service);
 
             if (Start(service) == 0)
                 Console.WriteLine("服务已启动。");
@@ -268,10 +268,11 @@ public static class ServiceRuntime
             Log.Warn($"设置服务描述失败: {Marshal.GetLastWin32Error()}");
     }
 
-    private static void SetDelayedAutoStart(IntPtr service)
+    private static void SetStartImmediately(IntPtr service)
     {
-        var info = new SERVICE_DELAYED_AUTO_START_INFO { fDelayedAutostart = 1 };
-        // 失败不影响功能，只是开机会更早启动
+        // 默认按"自动"立即启动。延迟启动（DelayedAutostart=1）会让开机后约 2 分钟才挂载，
+        // 用户开机就看到 C:\MacDisk 缺失，体验不好；而本服务启动开销极小，失败也会自动重试。
+        var info = new SERVICE_DELAYED_AUTO_START_INFO { fDelayedAutostart = 0 };
         ChangeServiceConfig2W(service, SERVICE_CONFIG_DELAYED_AUTO_START_INFO, ref info);
     }
 
