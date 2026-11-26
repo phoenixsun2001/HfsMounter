@@ -107,7 +107,8 @@ public static class Gpt
         }
 
         string? warning = null;
-        uint expectedCrc = BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(88));
+        // GPT 头 CRC 在偏移 16，校验范围是整个 headerSize，计算时把 CRC 字段自身清零。
+        uint expectedCrc = BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(16));
         if (expectedCrc != 0)
         {
             byte[] copy = header.AsSpan(0, headerSize).ToArray();

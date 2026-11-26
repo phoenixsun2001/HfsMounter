@@ -21,8 +21,12 @@ Windows 上以**只读**方式挂载 Mac 磁盘（HFS+ / HFSX）的小工具，�
 | --- | --- |
 | Windows 10 / 11 x64 | 服务模式依赖 SCM，目录挂载依赖 WinFsp |
 | [.NET 8 Runtime](https://dotnet.microsoft.com/download/dotnet/8.0) | 框架依赖发布；用 `-SelfContained` 发布可免安装 |
-| [WinFsp 2.1+](https://winfsp.dev/rel/) | `winget install WinFsp.WinFsp` |
+| [WinFsp 2.1+](https://winfsp.dev/rel/) | 推荐用官方 MSI：`winfsp-2.1.25156.msi`（`winget install WinFsp.WinFsp` 在部分机器上会装成 2.2 的 SxS 布局但缺少启动器服务，见下） |
 | 管理员权限 | 读物理磁盘 `\\.\PHYSICALDRIVEn` 需要；服务本身以 LocalSystem 运行，所以装完就不需要再提权 |
+
+> WinFsp 2.x 采用 SxS 目录布局：DLL 位于 `%ProgramFiles(x86)%\WinFsp\SxS\sxs.<时间戳>\bin`（`bin` 是指向它的 junction），
+> 不一定会出现在 `System32`。本服务会读注册表 `HKLM\SOFTWARE\WinFsp` 的 `SxsDir`/`InstallDir` 并按需 `LoadLibraryW`，
+> 所以 `WinFsp: 已安装  loader=...` 这一行显示的是实际加载到的路径。
 
 ## 快速开始
 
@@ -45,6 +49,16 @@ cd src\scripts
 - 插上 Mac 磁盘 → 几秒内自动出现在挂载根目录，无需任何操作。
 - 打开资源管理器访问 `C:\MacDisk`（第二个磁盘会是 `C:\MacDisk2`，依此类推）。
 - 服务随开机自启；崩溃会被 SCM 按 5s / 15s / 60s 退避重启。
+
+如果 `winget install WinFsp.WinFsp` 装完 `--status` 仍报未安装，改用官方 MSI（无需卸载旧目录，MSI 会接管）：
+
+```powershell
+curl.exe -sSL -o "$env:TEMP\winfsp-2.1.25156.msi" `
+  https://github.com/winfsp/winfsp/releases/download/v2.1/winfsp-2.1.25156.msi
+msiexec /i "$env:TEMP\winfsp-2.1.25156.msi" /qn /norestart
+```
+
+（`Invoke-WebRequest` 访问 GitHub 在部分网络下会报 `Authentication failed`，`curl.exe` 正常。）
 
 ## 命令一览
 
@@ -171,9 +185,25 @@ cd src\scripts
 | 插盘没反应 | `.\status.ps1` 看“当前检测到的 HFS+ 分区”是否为 0；为 0 时再看是否提示“有磁盘无法访问” |
 | `--probe` 说权限不足 | 服务模式以 LocalSystem 运行没有此问题；手动执行 `--probe` 需管理员终端 |
 | `WinFsp: 未安装` | `winget install WinFsp.WinFsp`，然后重启服务 |
-| 服务装了但没挂载 | 看日志里 `挂载失败` / `Preflight` 相关行；确认 `mountRoot` 目录可写、没被别的程序占用 |
+| 服务的日志里说找不到 `winfsp-x64.dll` | WinFsp 2.x 用 SxS 目录布局（`Program Files (x86)\WinFsp\SxS\sxs.*\bin`）。服务会依次尝试程序目录、System32、注册表里的 `SxsDir`/`InstallDir`，正常无需手工拷贝；若全部失败，重新运行 WinFsp 安装包并重启 |
+| 服务装了但没挂载 | 看日志里 `挂载失败` / `挂载点 …` 相关行；确认 `mountRoot` 目录可写、没被别的程序占用 |
+| 日志里出现 `挂载点 C:\MacDisk 已被占用` | 该目录已存在且非空（或有别的程序在用），服务会自动改用 `C:\MacDisk2`、`C:\MacDisk3`……；也可以手工删掉这个空目录或改 `mountRoot` |
 | 挂载目录里是空的 | 磁盘可能是 APFS；本工具只支持 HFS+/HFSX |
 | 盘符 X: 没出现 | 盘符联动是每用户任务：`HfsMounter.exe --linker-install X: C:\MacDisk`，或重新登录 |
+
+> 目录挂载点由 WinFsp 自己创建（内部用 `FspCreateDirectoryFileW` + reparse point），程序不会预先 `mkdir`；
+> 服务启动或重启时会先清掉上次异常退出残留的 reparse point / 空目录，再挂载。
+
+## 实测记录
+
+以下结果来自 Windows 11（10.0.26200）+ .NET 8 + WinFsp 2.1.25156 + 一块 1 TB USB 机械盘（GPT，第二个分区为 HFS+/HFSX 日志式）：
+
+- 服务 `sc qc HfsMounter`：`START_TYPE = AUTO_START (DELAYED)`，账户 `LocalSystem`，登录即启动，无需再手动跑脚本。
+- 插盘后 15 秒内自动挂载到 `C:\MacDisk`，卷标取自卷上的名字（本例 `seagate`）。
+- 目录列举、文件读取、Time Machine 快照浏览（`Backups.backupdb/<机器名>/<时间戳>` 的目录硬链接与文件硬链接）均正常；
+  写入/删除被拒绝（`Access to the path ... is denied`）。
+- 强杀服务进程后由 SCM 在约 5 秒内自动拉起，并重新挂载（旧挂载点的残留 reparse point 被自动清理）。
+- 拔盘/卸载逻辑：连续 `removalGracePolls` 次健康检查失败才卸载，避免 USB 瞬时抖动误伤。
 
 ## 与上游版本的差异
 

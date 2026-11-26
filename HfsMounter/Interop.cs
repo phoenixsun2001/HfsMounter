@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Text;
+using Microsoft.Win32;
 using Microsoft.Win32.SafeHandles;
 
 namespace HfsMounter;
@@ -130,6 +132,119 @@ internal static class Win32
         return true;
     }
 
+    // ---------------------------------------------------------------- WinFsp 原生装载器
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode, EntryPoint = "LoadLibraryW")]
+    private static extern IntPtr LoadLibraryW(string lpLibFileName);
+
+    private static string? _winfspLoaderPath;
+    private static bool _winfspLoaderTried;
+
+    /// <summary>
+    /// 找到并预加载 winfsp-x64.dll。新版 WinFsp（2025 / SxS 布局）把原生库放在
+    /// %ProgramFiles(x86)%\WinFsp\bin，既不在 System32 也没有加进 PATH，
+    /// 所以这里按「exe 同目录 → System32 → 注册表 SxsDir → 安装目录」依次找，找到就 LoadLibrary，
+    /// 后续 winfsp-msil 的 P/Invoke 就能按模块名解析到已加载的库。
+    /// </summary>
+    public static bool EnsureWinfspLoader(out string detail)
+    {
+        if (_winfspLoaderTried)
+        {
+            detail = _winfspLoaderPath ?? "未找到";
+            return _winfspLoaderPath != null;
+        }
+        _winfspLoaderTried = true;
+
+        var tried = new List<string>();
+        foreach (string candidate in WinfspLoaderCandidates())
+        {
+            tried.Add(candidate);
+            if (!File.Exists(candidate)) continue;
+            try
+            {
+                if (LoadLibraryW(candidate) != IntPtr.Zero)
+                {
+                    _winfspLoaderPath = candidate;
+                    detail = candidate;
+                    return true;
+                }
+                tried[^1] += $"(LoadLibrary 失败, err={Marshal.GetLastWin32Error()})";
+            }
+            catch (Exception ex)
+            {
+                tried[^1] += $"({ex.GetType().Name})";
+            }
+        }
+
+        detail = "未找到 winfsp-x64.dll：" + string.Join(" | ", tried);
+        return false;
+    }
+
+    private static IEnumerable<string> WinfspLoaderCandidates()
+    {
+        yield return Path.Combine(AppContext.BaseDirectory, "winfsp-x64.dll");
+
+        string system32 = Environment.GetFolderPath(Environment.SpecialFolder.System);
+        yield return Path.Combine(system32, "winfsp-x64.dll");
+
+        string? sxs = ReadWinfspSxsDir();
+        if (sxs != null) yield return Path.Combine(sxs, "bin", "winfsp-x64.dll");
+
+        string programFilesX86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+        if (programFilesX86.Length > 0) yield return Path.Combine(programFilesX86, "WinFsp", "bin", "winfsp-x64.dll");
+
+        string? installDir = ReadWinfspInstallDir();
+        if (installDir != null) yield return Path.Combine(installDir, "bin", "winfsp-x64.dll");
+    }
+
+    private static string? ReadWinfspSxsDir() => ReadWinfspRegistryValue("SxsDir");
+
+    private static string? ReadWinfspInstallDir() => ReadWinfspRegistryValue("InstallDir");
+
+    /// <summary>读 HKLM\SOFTWARE\WinFsp 下的字符串值；新版安装器只写 32 位视图。</summary>
+    private static string? ReadWinfspRegistryValue(string name)
+    {
+        foreach (RegistryView view in new[] { RegistryView.Registry32, RegistryView.Registry64 })
+        {
+            try
+            {
+                using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, view);
+                using RegistryKey? key = baseKey.OpenSubKey(@"SOFTWARE\WinFsp");
+                if (key?.GetValue(name) is string value && value.Length > 0) return value.TrimEnd('\\');
+            }
+            catch (Exception)
+            {
+                // 视图不存在或没有权限
+            }
+        }
+        return null;
+    }
+
+    /// <summary>WinFsp 的驱动/服务是否已注册（新版只有 WinFsp.Launcher，驱动按需加载）。</summary>
+    public static bool WinfspServicesPresent()
+    {
+        string system32 = Environment.GetFolderPath(Environment.SpecialFolder.System);
+        if (File.Exists(Path.Combine(system32, "drivers", "winfsp.sys"))) return true;
+
+        foreach (string name in new[] { "winfsp", "WinFsp.Launcher" })
+        {
+            if (ServiceExists(name)) return true;
+        }
+        return false;
+    }
+
+    private static bool ServiceExists(string name)
+    {
+        try
+        {
+            using var key = Registry.LocalMachine.OpenSubKey($@"SYSTEM\CurrentControlSet\Services\{name}");
+            return key != null;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
     private static string ReadAnsiAt(byte[] buffer, uint offset)
     {
         if (offset == 0 || offset >= buffer.Length) return string.Empty;

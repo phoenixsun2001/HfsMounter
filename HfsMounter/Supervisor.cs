@@ -253,27 +253,13 @@ public sealed class Supervisor : IDisposable
         }
     }
 
-    /// <summary>WinFsp 是否已安装（只检查是不是有装载器/驱动，不加载它）。</summary>
+    /// <summary>WinFsp 是否可用：能加载到原生库，并且驱动/服务已注册。</summary>
     public static bool WinFspPresent(out string detail)
     {
-        string system32 = Environment.GetFolderPath(Environment.SpecialFolder.System);
-        string loader = Path.Combine(system32, "winfsp-x64.dll");
-        string driver = Path.Combine(system32, "drivers", "winfsp.sys");
-        bool hasLoader = File.Exists(loader);
-        bool hasDriver = File.Exists(driver);
-        detail = $"loader={hasLoader} driver={hasDriver}";
-
-        if (hasLoader && hasDriver) return true;
-
-        // 有些安装把文件放在 Program Files\WinFsp 下
-        string alt = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "WinFsp", "bin", "winfsp-x64.dll");
-        if (File.Exists(alt))
-        {
-            detail += $", alt={alt}";
-            return hasDriver;
-        }
-        return false;
+        bool services = Win32.WinfspServicesPresent();
+        bool loader = Win32.EnsureWinfspLoader(out string loaderPath);
+        detail = $"driver/service={services} loader={loaderPath}";
+        return services && loader;
     }
 
     public void Dispose()

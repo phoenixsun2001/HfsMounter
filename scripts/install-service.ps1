@@ -28,15 +28,11 @@ function Assert-Administrator {
     }
 }
 
-function Get-WinFspStatus {
-    $system32 = Join-Path $env:SystemRoot 'System32'
-    $loader = Join-Path $system32 'winfsp-x64.dll'
-    $driver = Join-Path $system32 'drivers\winfsp.sys'
-    [pscustomobject]@{
-        Loader = Test-Path -LiteralPath $loader
-        Driver = Test-Path -LiteralPath $driver
-        Installed = (Test-Path -LiteralPath $loader) -and (Test-Path -LiteralPath $driver)
-    }
+# WinFsp 检测交给 exe 自己做：它认得 System32 经典布局和新版 SxS 布局。
+function Test-WinFsp([string]$exePath) {
+    if (-not (Test-Path -LiteralPath $exePath)) { return $false }
+    $output = & $exePath --status 2>&1 | Out-String
+    return ($output -match 'WinFsp:\s*已安装')
 }
 
 Assert-Administrator
@@ -49,28 +45,7 @@ $exeInPublish = Join-Path $publishDir 'HfsMounter.exe'
 
 Write-Host '=== HfsMounter 服务安装 ===' -ForegroundColor Cyan
 
-# ---------------------------------------------------------------- 1. WinFsp
-$winfsp = Get-WinFspStatus
-if (-not $winfsp.Installed) {
-    Write-Host '未检测到 WinFsp 运行时（winfsp-x64.dll / winfsp.sys）。' -ForegroundColor Yellow
-    if (-not $NoWinget -and (Get-Command winget -ErrorAction SilentlyContinue)) {
-        Write-Host '尝试通过 winget 安装 WinFsp（会出现 UAC 或安装向导）...' -ForegroundColor Yellow
-        winget install --id WinFsp.WinFsp -e --accept-package-agreements --accept-source-agreements
-        $winfsp = Get-WinFspStatus
-    }
-    if (-not $winfsp.Installed) {
-        Write-Host ''
-        Write-Host '请手动安装 WinFsp 2.1 或更高版本，然后重新运行本脚本：' -ForegroundColor Red
-        Write-Host '    winget install WinFsp.WinFsp'
-        Write-Host '    https://winfsp.dev/rel/'
-        throw 'WinFsp 未安装，无法挂载。'
-    }
-    Write-Host 'WinFsp 安装完成。' -ForegroundColor Green
-} else {
-    Write-Host 'WinFsp 运行时已就绪。' -ForegroundColor Green
-}
-
-# ---------------------------------------------------------------- 2. 编译
+# ---------------------------------------------------------------- 1. 编译产物
 if (-not (Test-Path -LiteralPath $exeInPublish)) {
     if ($SkipBuild) { throw "找不到 $exeInPublish，且指定了 -SkipBuild。" }
     Write-Host '尚未发布过，先执行 build.ps1 ...' -ForegroundColor Cyan
@@ -78,11 +53,26 @@ if (-not (Test-Path -LiteralPath $exeInPublish)) {
 }
 if (-not (Test-Path -LiteralPath $exeInPublish)) { throw "找不到 $exeInPublish" }
 
-# ---------------------------------------------------------------- 3. 拷贝
-Write-Host "拷贝程序到 $installDir ..." -ForegroundColor Cyan
-New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+# ---------------------------------------------------------------- 2. WinFsp
+if (-not (Test-WinFsp $exeInPublish)) {
+    Write-Host '未检测到可用的 WinFsp 运行时。' -ForegroundColor Yellow
+    if (-not $NoWinget -and (Get-Command winget -ErrorAction SilentlyContinue)) {
+        Write-Host '尝试通过 winget 安装 WinFsp（可能出现安装向导）...' -ForegroundColor Yellow
+        winget install --id WinFsp.WinFsp -e --accept-package-agreements --accept-source-agreements
+    }
+    if (-not (Test-WinFsp $exeInPublish)) {
+        Write-Host ''
+        Write-Host '请手动安装 WinFsp 2.1 或更高版本，然后重新运行本脚本。' -ForegroundColor Red
+        Write-Host '注意：部分机器上 winget 会装成 2.2 的 SxS 布局但缺少启动器服务，此时改用官方 MSI：'
+        Write-Host '    curl.exe -sSL -o "$env:TEMP\winfsp.msi" https://github.com/winfsp/winfsp/releases/download/v2.1/winfsp-2.1.25156.msi'
+        Write-Host '    msiexec /i "$env:TEMP\winfsp.msi" /qn /norestart'
+        Write-Host '（Invoke-WebRequest 访问 GitHub 可能报 Authentication failed，curl.exe 正常）'
+        throw 'WinFsp 未安装，无法挂载。'
+    }
+}
+Write-Host 'WinFsp 运行时已就绪。' -ForegroundColor Green
 
-# 正在运行的服务会占用 exe，先停掉再覆盖
+# ---------------------------------------------------------------- 3. 停止旧服务并拷贝
 $existing = Get-Service -Name 'HfsMounter' -ErrorAction SilentlyContinue
 if ($existing -and $existing.Status -ne 'Stopped') {
     Write-Host '停止正在运行的旧服务 ...'
@@ -90,6 +80,8 @@ if ($existing -and $existing.Status -ne 'Stopped') {
     Start-Sleep -Seconds 1
 }
 
+Write-Host "拷贝程序到 $installDir ..." -ForegroundColor Cyan
+New-Item -ItemType Directory -Force -Path $installDir | Out-Null
 Get-ChildItem -LiteralPath $publishDir -File | ForEach-Object {
     Copy-Item -LiteralPath $_.FullName -Destination $installDir -Force
 }
@@ -98,7 +90,7 @@ $exe = Join-Path $installDir 'HfsMounter.exe'
 if (-not (Test-Path -LiteralPath $exe)) { throw "拷贝后找不到 $exe" }
 Write-Host "程序位置: $exe" -ForegroundColor Green
 
-# ---------------------------------------------------------------- 4. 注册服务
+# ---------------------------------------------------------------- 4. 注册并启动服务
 $installArgs = @('--install-service')
 if ($DataDirectory) { $installArgs = @('--data-dir', $DataDirectory) + $installArgs }
 
@@ -114,8 +106,8 @@ Start-Sleep -Seconds 2
 
 # ---------------------------------------------------------------- 5. 盘符联动（可选）
 if ($LinkerLetter) {
-    if (-not $DataDirectory) { $DataDirectory = Join-Path $env:ProgramData 'HfsMounter' }
-    $configPath = Join-Path $DataDirectory 'config.json'
+    $dataDir = if ($DataDirectory) { $DataDirectory } else { Join-Path $env:ProgramData 'HfsMounter' }
+    $configPath = Join-Path $dataDir 'config.json'
     $mountRoot = 'C:\MacDisk'
     if (Test-Path -LiteralPath $configPath) {
         try { $mountRoot = (Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json).mountRoot } catch { }
